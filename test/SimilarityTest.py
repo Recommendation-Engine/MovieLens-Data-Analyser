@@ -1,3 +1,6 @@
+import sys
+sys.path.insert(0, '../')
+
 from nose.tools import assert_equals, assert_true
 from Similarity import Similarity
 
