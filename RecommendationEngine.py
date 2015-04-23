@@ -6,10 +6,12 @@ import pprint
 
 class RecommendationEngine(object):
 
-	def __init__(self, inputfile, k):
+	def __init__(self, inputfile, testingfile, k):
 		self.__userDic = defaultdict(lambda: defaultdict(int))
+		self.__userDicSorted = defaultdict(list)
 		self.__similarityDict = defaultdict(lambda: defaultdict(float))
 		self.__inputfile = inputfile
+		self.__testingfile = testingfile
 		self.__k = k
 
 	def generateUserDic(self):
@@ -23,10 +25,10 @@ class RecommendationEngine(object):
 
 	def sortUserDictByMovieId(self):
 		for key in self.__userDic:
-			self.__userDic[key] = sorted(self.__userDic[key].items())
+			self.__userDicSorted[key] = sorted(self.__userDic[key].items())
 		
 	def calculateSimilarity(self):
-		adjustedUserDict = self._adjustValue(self.__userDic)
+		adjustedUserDict = self._adjustValue(self.__userDicSorted)
 
 		userSize = len(adjustedUserDict)
 
@@ -39,6 +41,33 @@ class RecommendationEngine(object):
 	def findTopKNeighbours(self):
 		for key in self.__similarityDict:
 			self.__similarityDict[key] = self._findTopKNeighboursForUser(self.__similarityDict[key])
+
+	def evaluate(self):
+		diff = 0.0
+		ratingCount = 0
+		zeroCount = 0
+		with open(self.__testingfile, 'r') as testingfile:
+			for line in testingfile:
+				items = line.split('::')
+				userId = int(items[0])
+				movieId = int(items[1])
+				rating = int(items[2])
+				topKUsers = self.__similarityDict[userId]
+				voteScore = 0.0
+				count = 0
+				for userSimPair in topKUsers:
+					if movieId in self.__userDic[userSimPair[0]]:
+						voteScore += self.__userDic[userSimPair[0]][movieId]
+						count += 1
+				if count > 0:
+					voteScore /= count
+				else:
+					zeroCount += 1
+				diff += abs(voteScore - rating)
+				ratingCount += 1
+		diff /= ratingCount
+		print 'Average Error:', diff
+		print 'zeroCount:', zeroCount
 
 	def _adjustValue(self, userDic):
 		adjustUserDic = {}
@@ -93,7 +122,7 @@ class RecommendationEngine(object):
 		return self.__similarityDict
 
 def main():
-	engine = RecommendationEngine("data/testing_1.txt",3)
+	engine = RecommendationEngine("data/training_1.txt", "data/testing_1.txt",300)
 	start_time = time.time()
 	engine.generateUserDic()
 	generateEnd = time.time()
@@ -107,11 +136,14 @@ def main():
 	engine.findTopKNeighbours()
 	findTopKNeighboursEnd = time.time()
 
+	engine.evaluate()
+	evaluateEnd = time.time()
+
 	print "generateUserDic cost: " + str(generateEnd - start_time) + " secs"
 	print "sortUserDictByMovieId cost: " + str(sortEnd - generateEnd) + " secs"
 	print "calculateSimilarity cost: " + str(calculateSimilarityEnd - sortEnd) + " secs"
 	print "findTopKNeighbours cost: " + str(findTopKNeighboursEnd - calculateSimilarityEnd) + " secs"
-
+	print "evaluate cost" + str(evaluateEnd - findTopKNeighboursEnd) + " secs"
 	with open("similarityResult.txt",'w') as output:
 		output.write(pprint.pformat(engine.getSimilarityDict(),indent=4))
 
