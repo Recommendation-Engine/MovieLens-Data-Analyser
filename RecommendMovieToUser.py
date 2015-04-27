@@ -4,7 +4,7 @@ from scipy.sparse import coo_matrix, dok_matrix
 
 from SimilarityCalculator import SimilarityCalculator
 
-class RecommendationEngine(object):
+class RecommendMovieToUser(object):
 
 	def __init__(self, inputfile, testingfile, userSize, movieSize):
 		self.__similarityMatrix = None
@@ -93,7 +93,7 @@ class RecommendationEngine(object):
 		return userId, movieId, rating
 
 def main():
-	engine = RecommendationEngine("data/training.txt", "data/testing.txt", 6040, 3952)
+	engine = RecommendMovieToUser("data/training.txt", "data/testing.txt", 6040, 3952)
 
 	start_time = time.time()
 	engine.generateUserMatrix()
