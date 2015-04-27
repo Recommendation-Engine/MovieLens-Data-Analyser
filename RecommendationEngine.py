@@ -1,10 +1,8 @@
-from collections import defaultdict
-from math import sqrt
-from operator import itemgetter
 import time
-import pprint
 import numpy
 from scipy.sparse import coo_matrix, dok_matrix
+
+from SimilarityCalculator import SimilarityCalculator
 
 class RecommendationEngine(object):
 
@@ -38,10 +36,8 @@ class RecommendationEngine(object):
 			self.__rating_avg = rating_sum/count
 	
 	def calculateSimilarity(self):
-		similarity_matrix = self.__userMovieMatrix.dot(self.__userMovieMatrix.T).todense()
-		norm_matrix = self._generateNormMatrix(similarity_matrix)
-
-		self.__similarityMatrix = self._calculateCosineMatrix(similarity_matrix,norm_matrix)
+		similarityCalculator = SimilarityCalculator(self.__userMovieMatrix)
+		self.__similarityMatrix = similarityCalculator.calculateSimilarity()
 
 	def sortNeighbours(self):
 		self.__sortedIndexMatrix = self.__similarityMatrix.argsort()
@@ -70,19 +66,6 @@ class RecommendationEngine(object):
 		diff /= cnt
 
 		return diff	
-
-	def _generateNormMatrix(self, similarity_matrix):
-		square_mag = numpy.diag(similarity_matrix)
-		inv_square_mag = 1 / square_mag
-		inv_square_mag[numpy.isinf(inv_square_mag)] = 0
-
-		return numpy.diag(numpy.sqrt(inv_square_mag))
-
-	def _calculateCosineMatrix(self,similarity_matrix,norm_matrix):
-		cosine_matrix = similarity_matrix * norm_matrix
-		cosine_matrix = cosine_matrix.T * norm_matrix
-
-		return cosine_matrix
 
 	def _getTopKNeighboursForAll(self, k):
 		return self.__sortedIndexMatrix[:, self.__userSize-k:self.__userSize]
