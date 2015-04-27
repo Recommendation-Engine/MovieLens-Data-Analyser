@@ -4,36 +4,73 @@ from operator import itemgetter
 import time
 import pprint
 import numpy
-from scipy.sparse import csr_matrix, dok_matrix
+from scipy.sparse import coo_matrix, dok_matrix
 
 class RecommendationEngine(object):
 
 	def __init__(self, inputfile, testingfile, userSize, movieSize):
-		self.__userDic = defaultdict(lambda: defaultdict(int))
 		self.__similarityMatrix = None
 		self.__sortedIndexMatrix = None
 		self.__inputfile = inputfile
 		self.__testingfile = testingfile
 		self.__userSize = userSize
 		self.__movieSize = movieSize
+		self.__rating_avg = 0.0
 		self.__userMovieMatrix = dok_matrix((userSize+1,movieSize+1))
+		self.__userMovieOrigin = dok_matrix((userSize+1,movieSize+1))
+		self.__userMovieBinary = dok_matrix((userSize+1,movieSize+1))
+		self.__resultMatrix = None
 
-	def _processLine(self,line):
-		items = line.split("::")
-		userId = int(items[0])
-		movieId = int(items[1])
-		rating = int(items[2])
-
-		return userId, movieId, rating
-
-	def generateUserDic(self):
+	def generateUserMatrix(self):
 		with open(self.__inputfile, 'r') as source:
+			rating_sum, count = 0.0, 0
+
 			for line in source:
 				userId, movieId, rating = self._processLine(line)
 
-				self.__userDic[userId][movieId] = rating
 				self.__userMovieMatrix[userId,movieId] = (rating - 3)
+				self.__userMovieOrigin[userId,movieId] = rating
+				self.__userMovieBinary[userId,movieId] = 1
+
+				rating_sum += rating
+				count += 1
+
+			self.__rating_avg = rating_sum/count
+	
+	def calculateSimilarity(self):
+		similarity_matrix = self.__userMovieMatrix.dot(self.__userMovieMatrix.T).todense()
+		norm_matrix = self._generateNormMatrix(similarity_matrix)
+
+		self.__similarityMatrix = self._calculateCosineMatrix(similarity_matrix,norm_matrix)
+
+	def sortNeighbours(self):
+		self.__sortedIndexMatrix = self.__similarityMatrix.argsort()
+
+	def generateRecommendMatrix(self, k):		
+		filter_matrix = self._generateFilterMatrix(k)
+
+		dot_product_matrix = filter_matrix.dot(self.__userMovieOrigin).todense()
+		size_matrix = filter_matrix.dot(self.__userMovieBinary).todense()
+		res_matrix = numpy.divide(dot_product_matrix, size_matrix)
 		
+		res_matrix[numpy.isinf(res_matrix)] = self.__rating_avg
+		res_matrix[numpy.isnan(res_matrix)] = self.__rating_avg
+
+		self.__resultMatrix = res_matrix
+	
+	def evaluate(self):
+		diff = 0.0
+		cnt = 0
+
+		with open(self.__testingfile, 'r') as testingfile:
+			for line in testingfile:
+				userId, movieId, rating = self._processLine(line)
+				diff += abs(self.__resultMatrix[userId, movieId]-rating)
+				cnt += 1
+		diff /= cnt
+
+		return diff	
+
 	def _generateNormMatrix(self, similarity_matrix):
 		square_mag = numpy.diag(similarity_matrix)
 		inv_square_mag = 1 / square_mag
@@ -47,77 +84,56 @@ class RecommendationEngine(object):
 
 		return cosine_matrix
 
-	def calculateSimilarity(self):
-		similarity_matrix = self.__userMovieMatrix.dot(self.__userMovieMatrix.T).todense()
-		norm_matrix = self._generateNormMatrix(similarity_matrix)
+	def _getTopKNeighboursForAll(self, k):
+		return self.__sortedIndexMatrix[:, self.__userSize-k:self.__userSize]
 
-		self.__similarityMatrix = self._calculateCosineMatrix(similarity_matrix,norm_matrix)
+	def _generateFilterMatrix(self, k):
+		#Filter Matrix's size is usersize*usersize, (user, topKneighbour) = 1, otherwise = 0
+		topKUsersAll = self._getTopKNeighboursForAll(k)
 
-	def sortNeighbours(self):
-		self.__sortedIndexMatrix = self.__similarityMatrix.argsort()
+		xindex = numpy.zeros((self.__userSize+1, k))
+		for i in range(1, self.__userSize+1):
+			xindex[i,:] = i
 
-	def getTopKNeighbours(self, user, k):
-		topKNeighbours = self.__sortedIndexMatrix[user, self.__userSize-k:self.__userSize]
+		filter_matrix = coo_matrix((numpy.ones((self.__userSize+1)*k), 
+			(xindex.flatten(), numpy.asarray(topKUsersAll).flatten())), 
+			shape=(self.__userSize+1, self.__userSize+1))
 
-		return numpy.asarray(topKNeighbours).flatten()
+		return filter_matrix
 
-	def _calculateVoteScore(self, topKUsers, movieId):
-		voteScore = 0.0
-		count = 0
-		for user in topKUsers:
-			if movieId in self.__userDic[user]:
-				voteScore += self.__userDic[user][movieId]
-				count += 1
+	def _processLine(self,line):
+		items = line.split("::")
+		userId = int(items[0])
+		movieId = int(items[1])
+		rating = int(items[2])
 
-		if count > 0:
-			voteScore /= count
-
-		return voteScore
-
-	def evaluate(self, k):
-		diff = 0.0
-		ratingCount = 0
-
-		with open(self.__testingfile, 'r') as testingfile:
-			for line in testingfile:
-				userId, movieId, rating = self._processLine(line)
-
-				topKUsers = self.getTopKNeighbours(userId, k)
-				
-				voteScore = self._calculateVoteScore(topKUsers, movieId)
-				diff += abs(voteScore - rating)
-				ratingCount += 1
-
-		diff /= ratingCount
-		return diff
+		return userId, movieId, rating
 
 def main():
 	engine = RecommendationEngine("data/training.txt", "data/testing.txt", 6040, 3952)
-	start_time = time.time()
-	engine.generateUserDic()
-	generateEnd = time.time()
 
-	print "generateUserDic cost: " + str(generateEnd - start_time) + " secs"
+	start_time = time.time()
+	engine.generateUserMatrix()
+	generateEnd = time.time()
+	print "generateUserMatrix cost: " + str(generateEnd - start_time) + " secs"
 
 	engine.calculateSimilarity()
 	calculateSimilarityEnd = time.time()
-
 	print "calculateSimilarity cost: " + str(calculateSimilarityEnd - generateEnd) + " secs"
 
 	engine.sortNeighbours()
 	sortNeighboursEnd = time.time()
-
 	print "sortNeighbours cost: " + str(sortNeighboursEnd - calculateSimilarityEnd) + " secs"
 
 	with open("evaluateResult.txt", 'w') as output:
-		for k in range(1,500):
+		for k in range(1,800):
 			if k % 10 == 0:
-				print "be more confident! K is :" + str(k) + " now!"
-				output.write("for k = " + str(k) + " error is : " + str(engine.evaluate(k))) + "\n"
+				engine.generateRecommendMatrix(k)
+
+				print "be more confident! K is " + str(k) + " now!"
+				output.write("for k = " + str(k) + " error is : " + str(engine.evaluate()) + "\n")
 	evaluateEnd = time.time()
-
 	print "evaluate cost: " + str(evaluateEnd - sortNeighboursEnd) + " secs"
-
 
 if __name__ == '__main__':
 	main()
